@@ -340,8 +340,8 @@ PDF → Preprocessor (LLM/Naive) → Chunks
 |-----------|-----------|-------------------|
 | Vector Database | ChromaDB (HNSW) | Singleton connection, thread-safe |
 | Keyword Search | Elasticsearch (BM25) | Parallel with vector search |
-| Embeddings | BAAI/bge-m3 | Singleton, GPU-accelerated |
-| Reranker | BAAI/bge-reranker-large | Singleton with mutex |
+| Embeddings | BAAI/bge-m3 | Singleton, GPU-accelerated with semaphore |
+| Reranker | BAAI/bge-reranker-large | Singleton, GPU-accelerated with mutex |
 | LLM | Google Gemini 2.5 Flash | Query expansion & synthesis |
 | PDF Processing | PyMuPDF, LangChain | Streaming for memory efficiency |
 | Orchestration | ThreadPoolExecutor | Parallel subqueries & tool calls |
