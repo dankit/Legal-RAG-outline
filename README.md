@@ -9,7 +9,9 @@ Iowa administrative code,
 Iowa constitution,
 US code (federal law),
 US constitution,
-US code of federal regulations
+US code of federal regulations. 
+
+Overall 3 million+ embeddings, and 250,000+ pages of data.
 
 ---
 
