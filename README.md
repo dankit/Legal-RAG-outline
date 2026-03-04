@@ -2,7 +2,9 @@
 
 **3/4/2026 update: Link to training script: https://github.com/dankit/trainingdeployment **
 
-This project was finished around late October to early November 2025. This was BEFORE coding models were as powerful as they are today - For reference, this was completed before Opus 4.5 was released. Coding models back then were making lots of mistakes, less reliable, more sloppy, and overall required more human involvement than they would today. I would consider this one of the last projects that I have written primarily hand, where over 90% was done manually.
+This project was finished around late October to early November 2025. This was BEFORE coding models were as powerful as they are today - For reference, this was completed before Opus 4.5 was released. Coding models back then were making lots of mistakes, less reliable, more sloppy, and overall required more human involvement than they would today. I would consider this one of the last projects that I have written primarily hand, where over 90% was done manually. If interested in the code, feel free to message! The only reason the code is not public, is because I never got around to cleaning everything up, so there are a lot of notes scattered around along with api keys.
+
+The chroma embeddings have been published here: https://huggingface.co/datasets/dhlak/legal_chroma_embeddings
 
 ## System Overview
 
