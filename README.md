@@ -1,256 +1,251 @@
-# Legal-based RAG Project Architecture
+3/15/2026 update: I used opus 4.6 to cleanup the entire project. I have not self verified all the code, and cannot guarantee that everything matches 1:1 with the original project code. If anything, the structure should remain the same, so the high level idea does not change. When I was doing this project I also intentionally tried to avoid using libraries such as langchain. This is because I felt like libraries over-abstracted the internals which was hindering my learning oppurtunity.
 
-**3/4/2026 update: Link to training script: https://github.com/dankit/rag-reranker-finetuning**
+3/4/2026 update:
+This project was finished around late October to early November 2025 and was my very first AI project. During this time, I had to learn a completely new tech stack (python, docker, kubernetes, model hosting, vector databases, you get the point). This was BEFORE coding models were as powerful as they are today - For reference, this was completed before Opus 4.5 was released. Coding models back then were making lots of mistakes, less reliable, more sloppy, and overall required more human involvement than they would today. I would consider this one of the last projects that I have written primarily hand, where over 90% was done manually. ~~If interested in the code, feel free to message! The only reason the code is not public, is because I never got around to cleaning everything up, so there are a lot of notes scattered around along with api keys.~~
 
-This project was finished around late October to early November 2025. This was BEFORE coding models were as powerful as they are today - For reference, this was completed before Opus 4.5 was released. Coding models back then were making lots of mistakes, less reliable, more sloppy, and overall required more human involvement than they would today. I would consider this one of the last projects that I have written primarily hand, where over 90% was done manually. If interested in the code, feel free to message! The only reason the code is not public, is because I never got around to cleaning everything up, so there are a lot of notes scattered around along with api keys.
+Link to training script: https://github.com/dankit/rag-reranker-finetuning
 
 The chroma embeddings have been published here: https://huggingface.co/datasets/dhlak/legal_chroma_embeddings
 
+
+# Legal RAG
+
+An AI-powered retrieval-augmented generation system for legal document search and conversational Q&A. Combines dense vector search, sparse keyword search, cross-encoder reranking, and LLM-based synthesis with multi-level self-correction.
+
+---
+
 ## System Overview
 
-This is a legal document search system with conversational AI interface, combining vector search, keyword search, and LLM reasoning. 
-Documents in collection:
-Iowa code (state law),
-Iowa administrative code,
-Iowa constitution,
-US code (federal law),
-US constitution,
-US code of federal regulations. 
-
-Overall 3 million+ embeddings, and 250,000+ pages of data.
-
----
-
-## 1. High-Level Architecture
-
-```mermaid
-graph LR
-    User[👤 User] --> ChatAgent[Chat Agent]
-    
-    ChatAgent -->|Direct| Direct[Internal Knowledge]
-    ChatAgent -->|Search| SearchAgent[Search Agent]
-    
-    SearchAgent --> HybridSearch[Hybrid Search<br/>Internal Documents]
-    SearchAgent --> WebSearch[Web Search<br/>External]
-    
-    Direct --> Results[📄 Results]
-    HybridSearch --> Results
-    WebSearch --> Results
-    
-    style ChatAgent fill:#e1f5ff
-    style Direct fill:#c8e6c9
-    style SearchAgent fill:#f3e5f5
-    style HybridSearch fill:#fff3e0
-    style WebSearch fill:#fff3e0
-```
+A legal document search system with a conversational AI interface. The system combines vector search, keyword search, and LLM reasoning with built-in self-triage — it can iteratively refine its own search strategy, fetch more context, try different document collections, and fall back to web search when internal documents are insufficient.
 
 **Three Response Modes:**
-1. **Direct Response**: Greetings, clarifications, general knowledge (no search)
-2. **Hybrid Search**: Query internal document collections (ChromaDB + Elasticsearch)
-3. **Web Search**: External web search for out-of-corpus queries
+
+1. **Direct Response** — Greetings, clarifications, general knowledge (no search needed)
+2. **Hybrid Search** — Query internal document collections (ChromaDB + Elasticsearch)
+3. **Web Search** — External web search via Tavily for current events or out-of-corpus queries
 
 ---
 
-## 2. Search Flow (Main Pipeline with Self-Correction)
+## Architecture
 
-```mermaid
-graph TD
-    A[User Query] --> B[ChatAgent]
-    B --> C[SearchAgent]
-    C --> D[QueryProcessor<br/>Expand query into subqueries]
-    D --> E[SearchMethodSelector<br/>Choose: Hybrid or Web search]
-    
-    E -->|Hybrid| F[HybridSearch<br/>Vector + Keyword search]
-    E -->|Web| G[WebSearch<br/>External search]
-    
-    F --> H[BGEReranker<br/>Rerank top results]
-    H --> I[DocumentSummarizer<br/>Summarize documents]
-    
-    G --> I
-    
-    I -->|Need more context for document chunks| Tools[Tool Calls<br/>GetChunkNeighbors<br/>GetChunkByID]
-    Tools --> I
-    
-    I --> J[ResultSynthesizer<br/>Combine into final answer]
-    
-    J -->|Need more info| Research[SearchTool<br/>New search]
-    Research --> C
-    
-    J --> K[📝 Final Answer]
-    
-    style D fill:#ffe0b2
-    style E fill:#c8e6c9
-    style F fill:#b3e5fc
-    style H fill:#f8bbd0
-    style I fill:#e1bee7
-    style J fill:#ffccbc
-    style Tools fill:#c8e6c9
-    style Research fill:#fff9c4
 ```
-
----
-
-## 3. Hybrid Search Details
-
-```mermaid
-graph LR
-    Query[User Query] --> VectorPath[Vector Search]
-    Query --> KeywordPath[Keyword Search]
-    
-    VectorPath --> BGEEmbed[BGEEmbeddings<br/>Create query embedding]
-    BGEEmbed --> ChromaDB[(ChromaDB<br/>Similarity Search)]
-    
-    KeywordPath --> Elastic[(Elasticsearch<br/>BM25 Search)]
-    
-    ChromaDB --> RRF[Reciprocal Rank Fusion<br/>Combine results]
-    Elastic --> RRF
-    
-    RRF --> Reranker[BGEReranker<br/>Cross-encoder]
-    Reranker --> TopK[Top K Results]
-    
-    style BGEEmbed fill:#c8e6c9
-    style ChromaDB fill:#e0e0e0
-    style Elastic fill:#e0e0e0
-    style RRF fill:#fff9c4
-    style Reranker fill:#f8bbd0
+User Query
+    │
+    ▼
+┌──────────────────────────────────────────────────┐
+│  ChatAgent                                       │
+│  Decides: Direct / SimpleSearch / SequentialSearch│
+│  Memory: Rolling window (10 turns) + compression │
+└──────────────────┬───────────────────────────────┘
+                   │
+                   ▼
+┌──────────────────────────────────────────────────┐
+│  SearchAgent (orchestrator)                      │
+│  1. QueryProcessor  → expand into subqueries     │
+│  2. Execute subqueries in parallel               │
+│  3. ResultSynthesizer → combine into final answer│
+└──────────────────┬───────────────────────────────┘
+                   │  (per subquery)
+                   ▼
+┌──────────────────────────────────────────────────┐
+│  SearchMethodSelector                            │
+│  LLM routes to Hybrid or Web search              │
+│  Excludes previously tried collections           │
+│  Falls back to WebSearch after 3 failed attempts │
+└─────────┬────────────────────────┬───────────────┘
+          │                        │
+          ▼                        ▼
+┌──────────────────┐    ┌──────────────────┐
+│  Hybrid Search   │    │  Web Search      │
+│  ChromaDB vector │    │  (Tavily API)    │
+│  + Elasticsearch │    └────────┬─────────┘
+│  → Weighted RRF  │             │
+└────────┬─────────┘             │
+         │                       │
+         ▼                       │
+┌──────────────────┐             │
+│  BGE Reranker    │             │
+│  Cross-encoder   │             │
+│  Top 10 results  │             │
+└────────┬─────────┘             │
+         │                       │
+         ▼                       ▼
+┌──────────────────────────────────────────────────┐
+│  DocumentSummarizer                              │
+│  Summarizes results, can self-correct by         │
+│  fetching chunk neighbors/by ID (up to 5x)      │
+└──────────────────┬───────────────────────────────┘
+                   │
+                   ▼
+┌──────────────────────────────────────────────────┐
+│  ResultSynthesizer                               │
+│  Combines all subquery summaries                 │
+│  Can trigger re-searches (up to 3x)              │
+│  Falls back to web search at limit               │
+└──────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 4. Document Processing Pipeline
+## Search Pipeline (detailed)
 
-### Option A: LLM-Based Preprocessing
-```mermaid
-graph LR
-    PDF[📄 PDF Files] --> LLMPre[LLM_PDF_Preprocessor<br/>Gemini chunks by page]
-    LLMPre --> JSON[JSON Chunks<br/>with metadata]
-    JSON --> Indexer[PDFIndexer]
-    Indexer --> Embed[BGEEmbeddings]
-    Embed --> VectorDB[(ChromaDB)]
-    Indexer --> ES[(Elasticsearch)]
-    
-    style LLMPre fill:#e1bee7
-    style Indexer fill:#ffccbc
-    style Embed fill:#c8e6c9
-```
+### 1. Query Expansion
 
-### Option B: Naive Preprocessing
-```mermaid
-graph LR
-    PDF[📄 PDF Files] --> Naive[NaivePDFPreprocessor<br/>Markdown + heading detection]
-    Naive --> Chunks[Validated Chunks]
-    Chunks --> Embed[BGEEmbeddings]
-    Chunks --> ES[(Elasticsearch)]
-    Embed --> VectorDB[(ChromaDB)]
-    
-    style Naive fill:#ffccbc
-    style Embed fill:#c8e6c9
-```
+The user's query is expanded into up to 3 subqueries by the `QueryProcessor`. Abbreviations are expanded to canonical forms (e.g. "DUI" → "drinking under the influence"), and the query is rephrased to maximize retrieval relevance. All subqueries execute in parallel via `ThreadPoolExecutor`.
 
----
+### 2. Search Method Selection (with collection triage)
 
-## 5. Core Components & Singletons
+For each subquery, the `SearchMethodSelector` uses the LLM to choose the best search method:
 
-```mermaid
-graph TB
-    subgraph SearchOrchestration[Search Orchestration]
-        SA[SearchAgent] --> QP[QueryProcessor]
-        SA --> SMS[SearchMethodSelector]
-        SA --> DS[DocumentSummarizer]
-        SA --> RS[ResultSynthesizer]
-    end
-    
-    subgraph DataLayer[Data Layer - Singletons 🔒]
-        VDBClient[VectorDatabaseClient] --> ChromaDB[(ChromaDB)]
-        ESClient[ElasticSearchClient] --> ES[(Elasticsearch)]
-        BGEEmbed[BGEEmbeddings<br/>bge-m3]
-        BGERerank[BGEReranker<br/>bge-reranker-large]
-    end
-    
-    style SA fill:#f3e5f5
-    style VDBClient fill:#fff3e0
-    style ESClient fill:#fff3e0
-    style BGEEmbed fill:#c8e6c9
-    style BGERerank fill:#f8bbd0
-```
+- **Hybrid Search** — If the query can be answered from an internal document collection
+- **Web Search** — If the query is about current events, news, or information not in the corpus
+
+The selector is aware of all available collections and picks the most relevant one. Critically, it **excludes collections that were already tried** for the same query (tracked in `QueryHistory.prev_collection_names`). If a hybrid search on collection A didn't yield good results and the system re-searches, it will try collection B instead — cycling through available collections before giving up.
+
+**Fallback behavior:** If `max_requery_attempts` (default: 3) is reached, the system automatically falls back to web search regardless of what the LLM would choose. If the LLM selects a collection that doesn't exist, it also falls back to web search.
+
+### 3. Hybrid Search
+
+Combines two retrieval methods and fuses their results:
+
+- **Dense search** — BGE-m3 embeddings queried against ChromaDB (inner product similarity)
+- **Sparse search** — BM25 keyword matching via Elasticsearch
+
+Results are combined using **Weighted Reciprocal Rank Fusion (RRF)** with near-equal weights (0.495 sparse / 0.505 dense). An alternative linear combination method with min-max normalization is also implemented.
+
+### 4. Reranking
+
+The top 25 hybrid results are reranked by a cross-encoder (`BAAI/bge-reranker-large` in fp16) down to the top 10 most relevant chunks. The reranker uses a mutex lock for thread safety since multiple subqueries may rerank concurrently and the system is not optimized against complications that arise (such as going OOM, fragmented memory allocations).
+
+### 5. Document Summarization (with context refinement)
+
+The `DocumentSummarizer` receives the reranked chunks and their metadata, then asks the LLM to summarize the most relevant information. If the LLM decides it needs more context, it can use tool calls to:
+
+- **GetChunkNeighborsTool** — Fetch chunks adjacent to a relevant chunk (expanding context window)
+- **GetChunkByIDTool** — Fetch a specific chunk by its ID
+
+This is a recursive process: after fetching more context, the summarizer re-invokes itself with the expanded document set. This repeats up to `max_tool_calls_attempts` (default: **5 iterations**), with previous tool calls tracked to prevent duplicate work.
+
+### 6. Result Synthesis (with re-search)
+
+The `ResultSynthesizer` combines all subquery summaries into a final cited answer. If the synthesizer determines the summaries are insufficient, it can trigger a **new search** via `SearchTool` — which re-enters the full pipeline (method selection → search → rerank → summarize).
+
+Re-searches are limited to `max_requery_attempts` (default: **3**). Once the limit is reached, the system produces a best-effort answer and clearly articulates uncertainty. If a re-search previously used web search, the query is re-expanded by the `QueryProcessor` to try different phrasing.
 
 ---
 
-## 6. ChatAgent Intelligence & Memory
+## Self-Correction Summary
 
-### Decision Flow
-```mermaid
-graph TD
-    Query[User Query] --> ChatLLM[ChatAgent + Gemini]
-    
-    ChatLLM -->|Direct| Direct[No Search Needed<br/>Greetings/Clarifications]
-    ChatLLM -->|Simple| Simple[SimpleSearchTool<br/>Single search]
-    ChatLLM -->|Complex| Sequential[SequentialSearchTool<br/>Multi-step max 3x]
-    
-    Direct --> Answer
-    Simple --> SA[SearchAgent]
-    Sequential --> Steps[Break into steps]
-    Steps --> SA
-    SA --> Answer[Response + Memory Update]
-    
-    Answer --> Memory{History >= 10?}
-    Memory -->|No| Store[Store conversation]
-    Memory -->|Yes| Compress[Summarize oldest 5<br/>Keep recent 5]
-    Compress --> Store
-    
-    style Direct fill:#c8e6c9
-    style Simple fill:#ffe0b2
-    style Sequential fill:#ffccbc
-    style Compress fill:#e1bee7
-```
+| Level | Component | Actions | Limit | Scope |
+|-------|-----------|---------|-------|-------|
+| **Context refinement** | DocumentSummarizer | GetChunkNeighbors, GetChunkByID | 5 iterations | Hybrid search only |
+| **Re-searching** | ResultSynthesizer | New search (full pipeline re-entry) | 3 attempts | All search types |
+| **Collection cycling** | SearchMethodSelector | Excludes previously tried collections | All available | Hybrid search only |
+| **Web fallback** | SearchMethodSelector | Falls back to web search | After 3 attempts | Automatic |
 
-**Response Modes:**
+---
+
+## ChatAgent: Conversation & Memory
+
+The `ChatAgent` is the user-facing interface. It decides how to handle each message:
+
 | Mode | When | Example |
 |------|------|---------|
-| **Direct** | Greetings, clarifications, general knowledge | *"Hello"*, *"Clarify that?"*, *"Thanks"* |
-| **SimpleSearch** | Single straightforward question | *"Speed limit in Iowa?"* |
-| **SequentialSearch** | Multi-step questions where answers build on each other | *"Who can file for emancipation and what are their rights afterward?"* |
+| **Direct** | Greetings, clarifications, general knowledge | *"Hello"*, *"Thanks"*, *"What is contract law?"* |
+| **SimpleSearch** | Single straightforward question | *"What is the speed limit in Iowa school zones?"* |
+| **SequentialSearch** | Multi-step questions where answers build on each other | *"Who can file for emancipation and what rights do they gain?"* |
 
-**Memory:** Rolling window (10 turns) with automatic compression to summaries
+**Sequential search** breaks a complex question into up to 3 logical steps, executes them in order (each step's result becomes context for the next), then synthesizes all step results into a single answer.
 
-**Sequential Search Example:**
+**Memory management:** Conversation history uses a rolling window of 10 turns. When the limit is reached, the oldest 5 turns are compressed into a summary by the LLM, preserving context while saving tokens.
+
+---
+
+## Data Ingestion
+
+Two preprocessing pipelines are available:
+
+### LLM Preprocessor (`llm_preprocessor.py`)
+
+Uses Gemini to semantically chunk PDF pages. The LLM decides where to split based on meaning, extracts metadata (topic, section), and handles text that spans page boundaries via a carry-over mechanism. Supports resuming from the last processed page.
+
+### Naive Preprocessor (`naive_preprocessor.py`)
+
+Rule-based pipeline that:
+1. Analyzes font sizes/weights to detect headings dynamically
+2. Converts PDF pages to markdown with heading hierarchy
+3. Splits on markdown headers, then by size with `RecursiveCharacterTextSplitter`
+4. Validates chunks (minimum size, word count, alpha ratio, citation filtering)
+5. Deduplicates via content hashing
+6. Streams page-by-page for memory efficiency
+
+Both pipelines store chunks in ChromaDB (for vector search) and Elasticsearch (for keyword search).
+
+---
+
+## Example Flows
+
+**Simple search (happy path):**
 ```
-Query: "Who can petition for emancipation in Iowa and what rights do they gain?"
-→ Step 1: Search "emancipation petition requirements Iowa" → Find age, residency requirements
-→ Step 2: Search "rights granted after emancipation Iowa" (using Step 1's found requirements as context)
-→ Step 3: Synthesize: "Minors aged 16+ meeting X criteria can petition, gaining rights to Y"
+"What is the speed limit in Iowa school zones?"
+→ ChatAgent selects SimpleSearchTool
+→ SearchAgent expands query into subqueries
+→ Hybrid search finds relevant chunks from Iowa code collection
+→ Reranker picks top 10
+→ DocumentSummarizer creates cited answer
+→ ResultSynthesizer returns final response
 ```
 
-### Self-Correction & Agent Tools
-
-```mermaid
-graph TD
-    Query[Search Query] --> Results[Reranked Results<br/>from Hybrid/Web Search]
-    Results --> Check{Search Type?}
-    
-    Check -->|Hybrid| Doc[DocumentSummarizer<br/>If needs more context:<br/>GetChunkNeighbors/ByID<br/>Max 5x]
-    Check -->|Web| Synth[ResultSynthesizer]
-    
-    Doc --> Synth[ResultSynthesizer<br/>Max 3 re-searches]
-    
-    Synth -->|Needs more info| ReSearch[New search]
-    ReSearch --> Query
-    
-    Synth -->|Complete| Answer[Final Answer]
-    Synth -->|Max attempts| WebFallback[⚠️ Fallback to WebSearch]
-    WebFallback --> Answer
-    
-    style Check fill:#fff9c4
-    style Doc fill:#e1bee7
-    style Synth fill:#ffccbc
-    style WebFallback fill:#ffccbc
+**Simple search (with self-correction):**
+```
+"What are penalties for repeat DUI offenses in Iowa?"
+→ Initial hybrid search finds general DUI info
+→ DocumentSummarizer needs more context
+  → GetChunkNeighbors (fetches adjacent chunks, iteration 1)
+  → GetChunkNeighbors (fetches more, iteration 2)
+→ Still incomplete → ResultSynthesizer triggers re-search with refined query
+→ Second search finds specific repeat-offense penalties
+→ Complete answer synthesized
 ```
 
-**Two-Level Self-Correction:**
-| Level | Actions | Limit | Scope |
-|-------|---------|-------|-------|
-| **Context Refinement** | GetChunkNeighbors, GetChunkByID | 5x | Hybrid search only |
-| **Re-searching** | New refined searches | 3x → WebSearch fallback | All searches |
+**Sequential search:**
+```
+"If someone is convicted of theft in Iowa, can they later get a professional license?"
+→ ChatAgent selects SequentialSearchTool
+→ Step 1: "theft conviction penalties Iowa" → finds Class D felony classification
+→ Step 2: "professional licensing with felony conviction Iowa" (using Step 1 context)
+→ Step 3: "license restoration process Iowa" (using both previous answers)
+→ Synthesize: Complete answer about conviction impact + restoration path
+```
+
+**Worst case (max attempts, web fallback):**
+```
+Query about an obscure recent event not in any collection
+→ Hybrid search on collection A → irrelevant results
+→ Re-search: tries collection B (A excluded) → still insufficient
+→ Re-search: tries collection C → still insufficient
+→ Max requery attempts (3) reached → automatic fallback to web search
+→ Tavily returns current web results
+→ Best available answer returned with web citations
+```
+
+---
+
+## Project Structure
+
+```
+app/
+├── agents/          # ChatAgent — conversational interface with tool-calling
+├── config/          # SearchConfig, QueryHistory — all tunable parameters
+├── core/            # Embeddings (BGE-m3), reranker (BGE-large), ChromaDB, preprocessors
+├── evals/           # Retrieval/reranker benchmarking with parameter sweeping
+├── prompts/         # All LLM prompts (chat, search, preprocessing)
+├── search/          # SearchAgent, hybrid search, query expansion, summarization, synthesis
+├── tools/           # Pydantic tool definitions for LLM function calling
+├── utils/           # File utilities and Elasticsearch client
+└── webscrapers/     # Tavily web search and Iowa Administrative Code scraper
+tests/               # Database tests, evaluation scripts, data quality validation
+```
 
 ---
 
@@ -259,96 +254,108 @@ graph TD
 | Component | Type | Purpose |
 |-----------|------|---------|
 | **ChatAgent** | Interface | Conversation management, decides response mode, delegates to SearchAgent |
-| **SearchAgent** | Orchestrator | Coordinates search pipeline, parallel subquery execution |
-| **QueryProcessor** | LLM | Expands queries into subqueries |
-| **SearchMethodSelector** | LLM | Chooses hybrid vs web search, fallback to web at limit |
-| **DocumentSummarizer** | LLM | Summarizes results, fetches context (5x max, hybrid only) |
-| **ResultSynthesizer** | LLM | Combines results, re-searches (3x max) with web fallback |
-| **HybridSearch** | Search | ChromaDB (vector) + Elasticsearch (BM25) → RRF → Rerank |
-| **WebSearch** | Search | External web search for out-of-corpus queries |
-| **VectorDatabaseClient** | Singleton | ChromaDB connection manager |
-| **ElasticSearchClient** | Data | BM25 keyword search and indexing |
-| **BGEEmbeddings** | Singleton | bge-m3 model for embeddings |
-| **BGEReranker** | Singleton | bge-reranker-large cross-encoder |
-| **PDFIndexer** | Processor | JSON chunks → embeddings → both databases |
-| **LLM_PDF_Preprocessor** | Processor | Gemini-based PDF chunking with metadata |
-| **NaivePDFPreprocessor** | Processor | Markdown-based chunking with heading detection |
+| **SearchAgent** | Orchestrator | Coordinates full search pipeline, parallel subquery execution |
+| **QueryProcessor** | LLM | Expands queries into subqueries, expands abbreviations |
+| **SearchMethodSelector** | LLM | Chooses hybrid vs web, cycles collections, web fallback at limit |
+| **DocumentSummarizer** | LLM | Summarizes results, fetches more context via tool calls (5x max) |
+| **ResultSynthesizer** | LLM | Combines subquery results, triggers re-searches (3x max) |
+| **HybridSearch** | Search | ChromaDB (dense) + Elasticsearch (BM25) → Weighted RRF |
+| **WebSearch** | Search | Tavily API for external web search |
+| **VectorDatabaseClient** | Singleton | ChromaDB connection manager with HNSW configuration |
+| **ElasticSearchClient** | Data | BM25 keyword search and bulk indexing |
+| **BGEEmbeddings** | Singleton | BAAI/bge-m3 embeddings, GPU-accelerated with semaphore |
+| **BGEReranker** | Singleton | BAAI/bge-reranker-large cross-encoder, fp16, mutex-locked |
+| **PDFIndexer** | Processor | JSON chunks → embeddings → ChromaDB |
+| **LLM_PDF_Preprocessor** | Processor | Gemini-based semantic chunking with metadata |
+| **NaivePDFPreprocessor** | Processor | Rule-based markdown chunking with heading detection |
 
 ---
 
-## Design Patterns & Key Features
+## Configuration
 
-**Singleton Pattern:** VectorDatabaseClient, BGEEmbeddings, BGEReranker (prevent OOM, thread-safe)
+All search parameters are centralized in `SearchConfig`:
 
-**Tool-Based Self-Correction:** LLMs dynamically decide:
-- Search strategy (hybrid vs web)
-- Context refinement (GetChunkNeighbors 5x)
-- Re-searching (3x with web fallback)
-- All with iteration limits to prevent infinite loops
-
-**Separation of Concerns:** Query processing → Search execution → Result synthesis
-
-**Parallel Execution:** ThreadPoolExecutor for subqueries and tool calls
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `max_tool_calls_attempts` | 5 | Max context-refinement iterations in DocumentSummarizer |
+| `max_requery_attempts` | 3 | Max re-searches before web fallback |
+| `hybrid_search_top_k` | 25 | Number of results from hybrid search before reranking |
+| `rerank_top_k` | 10 | Number of results after reranking |
+| `excluded_collections` | `["testing"]` | Collections to never search |
 
 ---
 
-## Example Flows
+## Design Patterns
 
-**Simple Search (Direct):**
-```
-"What is the speed limit in Iowa school zones?"
-→ ChatAgent → SearchAgent → Expand to subqueries
-→ Hybrid search finds relevant chunks
-→ DocumentSummarizer creates answer from top results
-→ ResultSynthesizer returns final answer
-```
-
-**Simple Search (With Self-Correction):**
-```
-"What are penalties for repeat DUI offenses in Iowa?"
-→ Initial search finds general DUI info
-→ DocumentSummarizer needs more context → GetChunkNeighbors (2x iterations)
-→ Still incomplete → ResultSynthesizer re-searches with refined query
-→ Complete answer found
-```
-
-**Worst Case (Max Attempts):**
-```
-Query about obscure topic not in corpus
-→ Multiple searches fail to find sufficient info
-→ Re-search attempts exhausted (3x)
-→ Automatic fallback to WebSearch
-→ Returns best available answer from web
-```
-
-**Sequential Search:**
-```
-"If someone is convicted of theft in Iowa, can they later get a professional license?"
-→ Step 1: Search "theft conviction penalties Iowa" → Find: Class D felony, specific restrictions
-→ Step 2: Search "professional licensing with felony conviction Iowa" 
-   (using Step 1's felony classification to inform search)
-→ Step 3: Search "license restoration process Iowa" (using both previous answers)
-→ Synthesize: Complete answer about conviction impact + restoration path
-```
-
-**Indexing:**
-```
-PDF → Preprocessor (LLM/Naive) → Chunks
-→ BGEEmbeddings → ChromaDB
-→ Same chunks → Elasticsearch
-```
+- **Singleton** — `VectorDatabaseClient`, `BGEEmbeddings`, `BGEReranker` all use thread-safe singletons to prevent OOM while allowing parallel search agents
+- **Tool-based self-correction** — LLMs dynamically decide search strategy, context refinement, and re-searching, all with iteration limits to prevent infinite loops
+- **Separation of concerns** — Query processing → method selection → search execution → summarization → synthesis, each as an independent component
+- **Parallel execution** — `ThreadPoolExecutor` for subqueries and tool calls
 
 ---
 
-## Technology Stack & Performance
+## Technology Stack
 
-| Component | Technology | Performance Notes |
-|-----------|-----------|-------------------|
-| Vector Database | ChromaDB (HNSW) | Singleton connection, thread-safe |
+| Component | Technology | Notes |
+|-----------|------------|-------|
+| Vector Database | ChromaDB (HNSW, inner product) | Singleton connection, thread-safe |
 | Keyword Search | Elasticsearch (BM25) | Parallel with vector search |
-| Embeddings | BAAI/bge-m3 | Singleton, GPU-accelerated with semaphore |
-| Reranker | BAAI/bge-reranker-large | Singleton, GPU-accelerated with mutex |
-| LLM | Google Gemini 2.5 Flash | Query expansion & synthesis |
-| PDF Processing | PyMuPDF, LangChain | Streaming for memory efficiency |
-| Orchestration | ThreadPoolExecutor | Parallel subqueries & tool calls |
+| Embeddings | [BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3) | Singleton, GPU-accelerated, semaphore (10 concurrent) |
+| Reranker | [BAAI/bge-reranker-large](https://huggingface.co/BAAI/bge-reranker-large) | Singleton, fp16, mutex-locked |
+| LLM | Gemini 2.5 Flash (Vertex AI) | Query expansion, routing, summarization, synthesis |
+| Web Search | [Tavily](https://tavily.com/) | Advanced search depth for current events |
+| PDF Processing | PyMuPDF, LangChain | Streaming page-by-page for memory efficiency |
+| Orchestration | ThreadPoolExecutor | Parallel subqueries and tool calls |
 
+---
+
+## Setup
+
+### Prerequisites
+
+- Python 3.10+
+- Google Cloud project with Vertex AI API enabled
+- Elasticsearch instance running (for hybrid search)
+- CUDA-capable GPU recommended (for embeddings and reranking)
+
+### Installation
+
+```bash
+pip install -r requirements.txt
+```
+
+### Environment
+
+1. Copy the environment template and fill in your keys:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. `TAVILY_API_KEY` — Get one at [tavily.com](https://tavily.com/)
+
+3. Authenticate with Google Cloud for Vertex AI:
+   ```bash
+   gcloud auth application-default login
+   ```
+
+### Usage
+
+**Interactive chat:**
+```bash
+python -m app.agents.chat_agent
+```
+
+**Run preprocessing:**
+```bash
+python -m app.core.naive_preprocessor
+```
+
+**Run benchmarks:**
+```bash
+python -m app.evals.benchmarker
+```
+
+**Run tests:**
+```bash
+pytest tests/
+```
