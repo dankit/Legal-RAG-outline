@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[codz]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+
+# Environments
+.env
+.envrc
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+.cursor/
+.cursorignore
+.cursorindexingignore
+
+# Data and models
+chroma_db/
+Data/
+BAAI/
+logs/
+*.json
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Testing / Coverage
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# OS
+.DS_Store
+Thumbs.db
